@@ -8,6 +8,7 @@ Tools:
   - get_series           : fetch a single series record by PID
   - lookup_by_identifier : look up literature by ISBN, DOI, or report number
   - get_item_locations   : fetch physical copy locations + CERN map URLs for a record
+  - browse_literature    : browse newest arrivals or most-loaned books/documents
 """
 
 from __future__ import annotations
@@ -28,7 +29,14 @@ from mcp.types import TextContent, Tool
 
 BASE_URL = "https://catalogue.library.cern/api"
 LITERATURE_ENDPOINT = f"{BASE_URL}/literature/"
+DOCUMENTS_ENDPOINT = f"{BASE_URL}/documents/"
 SERIES_ENDPOINT = f"{BASE_URL}/series/"
+
+BROWSE_SORT_MAP = {
+    "newest": "-created",
+    "most_loaned": "-mostloaned",
+    "recently_published": "-mostrecent",
+}
 DEFAULT_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 50
 REQUEST_TIMEOUT = 15.0
@@ -388,6 +396,25 @@ async def handle_get_series(arguments: dict[str, Any]) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(formatted, indent=2))]
 
 
+async def handle_browse_literature(arguments: dict[str, Any]) -> list[TextContent]:
+    sort_key = arguments.get("sort", "most_loaned")
+    sort_param = BROWSE_SORT_MAP.get(sort_key, "-mostloaned")
+    doc_type = arguments.get("document_type", "BOOK")
+    size = min(int(arguments.get("size", DEFAULT_PAGE_SIZE)), MAX_PAGE_SIZE)
+    page = int(arguments.get("page", 1))
+
+    q = f'document_type:"{doc_type.upper()}"'
+
+    client = get_http_client()
+    response = await client.get(
+        DOCUMENTS_ENDPOINT,
+        params={"q": q, "sort": sort_param, "size": size, "page": page},
+    )
+    response.raise_for_status()
+    formatted = _format_search_response(response.json(), _format_hit)
+    return [TextContent(type="text", text=json.dumps(formatted, indent=2))]
+
+
 async def handle_lookup_by_identifier(arguments: dict[str, Any]) -> list[TextContent]:
     value = arguments.get("value", "").strip()
     if not value:
@@ -536,6 +563,48 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="browse_literature",
+        description=(
+            "Browse the CERN Library catalogue by newest arrivals, most-loaned titles, "
+            "or most recently published. Great for discovery — finding what's popular at CERN "
+            "or what just arrived in the library."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "sort": {
+                    "type": "string",
+                    "enum": ["most_loaned", "newest", "recently_published"],
+                    "default": "most_loaned",
+                    "description": (
+                        "most_loaned: ranked by total historical loan count (most popular). "
+                        "newest: sorted by date the record was added to the catalogue. "
+                        "recently_published: sorted by publication year."
+                    ),
+                },
+                "document_type": {
+                    "type": "string",
+                    "enum": ["BOOK", "PROCEEDINGS", "STANDARD", "SERIAL"],
+                    "default": "BOOK",
+                    "description": "Type of document to browse. Defaults to BOOK.",
+                },
+                "size": {
+                    "type": "integer",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 50,
+                    "description": "Number of results to return.",
+                },
+                "page": {
+                    "type": "integer",
+                    "default": 1,
+                    "minimum": 1,
+                },
+            },
+            "required": [],
+        },
+    ),
+    Tool(
         name="get_item_locations",
         description=(
             "Given a literature record PID, returns the physical copy locations of that book "
@@ -602,6 +671,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             return await handle_get_series(arguments)
         case "lookup_by_identifier":
             return await handle_lookup_by_identifier(arguments)
+        case "browse_literature":
+            return await handle_browse_literature(arguments)
         case "get_item_locations":
             return await handle_get_item_locations(arguments)
         case _:
