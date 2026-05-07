@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment (managed by uv)
+.venv/
+
+# uv cache
+.uv/
+
+# Build artifacts
+dist/
+*.egg-info/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
